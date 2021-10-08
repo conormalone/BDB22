@@ -12,7 +12,9 @@ Done:
 
 To Do:
 (8/10) select relevant frames from return plays
-(8/10) get distance to all other players
+(8/10) get distance to all other players "for(i in 1:nrow(IPWorking)){
+  linesstore[i]<-pointDistance(c(IPWorking$X_std.x[i], IPWorking$Y_std.x[i]), c(IPWorking$X_std.y[i], IPWorking$Y_std.y[i]),lonlat=F )
+}" FROM FUMBLESWORKING
 (8/10) set up graph
 (8/10) GNN Model
 (8/10) predit Leave-One-Out blockers
