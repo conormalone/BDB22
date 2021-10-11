@@ -16,6 +16,7 @@ plays$gameId <- as.factor(plays$gameId)
 plays$playId <- as.factor(plays$playId)
 all_tracking$gameId <- as.factor(all_tracking$gameId)
 all_tracking$playId <- as.factor(all_tracking$playId)
+all_tracking$event <- as.factor(all_tracking$event)
 
 #add combined Id to give each play a unique reference
 plays$comb_id <- paste0(as.character(plays$gameId), " ", as.character(plays$playId))
@@ -31,4 +32,7 @@ rm(all_tracking)
 #add returner to tracking
 return_tracking <-merge(x = return_tracking, y = return_plays[ , c("comb_id", "returnerId")], by = "comb_id", all.x=TRUE)
 
+levels(droplevels(return_tracking$event))
+hist(table(return_tracking$event))
 
+     
