@@ -39,14 +39,16 @@ rm(all_tracking)
 return_tracking <-merge(x = return_tracking, y = return_plays[ ,c("comb_id", "kickReturnYardage", "returnerId", "possessionTeam","homeTeamAbbr")], by = "comb_id", all.x=TRUE)
 
 
-
+#preprocessing to add some useful variables
 pre_processing_function <- function(df){
   dataframe <- df %>% 
     mutate(toLeft = playDirection == "left", 
            isBallCarrier = nflId == returnerId,
            teamOnOffense = ifelse(possessionTeam == homeTeamAbbr, "home", "away"),  
-           isOnOffense = team == teamOnOffense  ## Is player on offense?
-    )   ## Standardized Dir
+           isOnOffense = team == teamOnOffense,  ## Is player on offense?
+           x_std = ifelse(toLeft, 120-x, x) - 10, ## Standardizes X
+           y_std = ifelse(toLeft, 160/3-y, y) ## Standardized Y
+           )   ## Standardized Dir
   
   
   return(dataframe)
@@ -54,6 +56,54 @@ pre_processing_function <- function(df){
 
 dataframe<-pre_processing_function(return_tracking)
 
+##########################
+#decide how to subset the data and put that here
+#get returner dist to other players ahead of him for each frame, take frames where dist is within say 5 yards
+#from original BDB20
+library(sp)
+library(raster)
+train_1<-dataframe %>% tidyr::fill(c(comb_id, frameId,  x_std, y_std))
+#get location of ball/rusher
+ballocation<-dataframe %>% filter(nflId == returnerId) %>% dplyr::select(c(comb_id, frameId, x_std, y_std))
+#join balllocation x,y as new variables
+IPWorking<-train_1 %>%
+  left_join(ballocation, by = c("GameId","PlayId"))
+library(raster)
+linesstore<-NULL
+#for each row calculate distance from ball                     
+for(i in 1:nrow(IPWorking)){
+  linesstore[i]<-pointDistance(c(IPWorking$X_std.x[i], IPWorking$Y_std.x[i]), c(IPWorking$X_std.y[i], IPWorking$Y_std.y[i]),lonlat=F )
+}
+#store distance from ball as new variable
+IPWorking$linelength<-linesstore 
+
+
+#subset for offense and order by distance from rusher
+IPWorking1<-IPWorking%>% unique %>%filter((Team == "away" & VisitorTeamAbbr == PossessionTeam) |(Team == "home" & HomeTeamAbbr == PossessionTeam))
+print(nrow(IPWorking1))
+IPWorking1$lineorder <-NULL
+IPWorking1<- IPWorking1 %>%
+  group_by(GameId, PlayId) %>%
+  mutate(lineorder = order(order(linelength, decreasing=F)))
+
+#subset for defense and order by distance from rusher
+IPWorking2<-IPWorking%>% unique %>%filter((Team == "home" & VisitorTeamAbbr == PossessionTeam) |(Team == "away" & HomeTeamAbbr == PossessionTeam))
+print(nrow(IPWorking2))
+IPWorking2$lineorder <-NULL
+IPWorking2<- IPWorking2 %>%
+  group_by(GameId, PlayId) %>%
+  mutate(lineorder = order(order(linelength, decreasing=F)))
+
+############
+#end bdb20 code
+
+
+
+
+
+
+
+#code to put in graph format, ties up with python file.
 to_loop <- dataframe %>% dplyr::select(comb_id, kickReturnYardage, x, y) %>% 
   group_by(PlayId) %>% 
   mutate(row = row_number())
