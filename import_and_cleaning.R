@@ -67,16 +67,13 @@ train_1<-dataframe %>% tidyr::fill(c(comb_id, frameId,  x_std, y_std))
 ballocation<-dataframe %>% filter(nflId == returnerId) %>% dplyr::select(c(comb_id, frameId, x_std, y_std))
 #join balllocation x,y as new variables
 IPWorking<-train_1 %>%
-  left_join(ballocation, by = c("GameId","PlayId"))
-library(raster)
+  left_join(ballocation, by = c("comb_id", "frameId"))
 linesstore<-NULL
 #for each row calculate distance from ball                     
-for(i in 1:nrow(IPWorking)){
-  linesstore[i]<-pointDistance(c(IPWorking$X_std.x[i], IPWorking$Y_std.x[i]), c(IPWorking$X_std.y[i], IPWorking$Y_std.y[i]),lonlat=F )
-}
+linesstore<-apply(IPWorking, 1, function(x) dist(rbind(c(x["x_std.x"], x["y_std.x"]), c(x["x_std.y"], x["y_std.y"])), method = "euclidean" )[1])
 #store distance from ball as new variable
 IPWorking$linelength<-linesstore 
-
+IPWorking[IPWorking$isBallCarrier ==1,]
 
 #subset for offense and order by distance from rusher
 IPWorking1<-IPWorking%>% unique %>%filter((Team == "away" & VisitorTeamAbbr == PossessionTeam) |(Team == "home" & HomeTeamAbbr == PossessionTeam))
