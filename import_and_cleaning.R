@@ -62,35 +62,26 @@ dataframe<-pre_processing_function(return_tracking)
 #from original BDB20
 library(sp)
 library(raster)
-train_1<-dataframe %>% tidyr::fill(c(comb_id, frameId,  x_std, y_std))
+#train_1<-dataframe %>% tidyr::fill(c(comb_id, frameId,  x_std, y_std))
 #get location of ball/rusher
 ballocation<-dataframe %>% filter(nflId == returnerId) %>% dplyr::select(c(comb_id, frameId, x_std, y_std))
 #join balllocation x,y as new variables
-IPWorking<-train_1 %>%
+IPWorking<-dataframe %>% dplyr::filter(isOnOffense ==F)%>%
   left_join(ballocation, by = c("comb_id", "frameId"))
 linesstore<-NULL
 #for each row calculate distance from ball                     
 linesstore<-apply(IPWorking, 1, function(x) dist(rbind(c(x["x_std.x"], x["y_std.x"]), c(x["x_std.y"], x["y_std.y"])), method = "euclidean" )[1])
 #store distance from ball as new variable
 IPWorking$linelength<-linesstore 
-IPWorking[IPWorking$isBallCarrier ==1,]
-
-#subset for offense and order by distance from rusher
-IPWorking1<-IPWorking%>% unique %>%filter((Team == "away" & VisitorTeamAbbr == PossessionTeam) |(Team == "home" & HomeTeamAbbr == PossessionTeam))
-print(nrow(IPWorking1))
-IPWorking1$lineorder <-NULL
-IPWorking1<- IPWorking1 %>%
-  group_by(GameId, PlayId) %>%
-  mutate(lineorder = order(order(linelength, decreasing=F)))
-
 #subset for defense and order by distance from rusher
-IPWorking2<-IPWorking%>% unique %>%filter((Team == "home" & VisitorTeamAbbr == PossessionTeam) |(Team == "away" & HomeTeamAbbr == PossessionTeam))
-print(nrow(IPWorking2))
-IPWorking2$lineorder <-NULL
-IPWorking2<- IPWorking2 %>%
-  group_by(GameId, PlayId) %>%
-  mutate(lineorder = order(order(linelength, decreasing=F)))
+IPWorking_Def<-IPWorking %>%
+  group_by(comb_id, frameId) %>%
+    mutate(lineorder = order(order(linelength, decreasing=F)), returner_x = x_std.x) %>% 
+    dplyr::select("comb_id", "frameId", "lineorder", "x" ) %>% 
+                  pivot_wider(names_from = lineorder, values_from = x)%>%
+  left_join(ballocation, by = c("comb_id", "frameId"))
 
+# have wide frame of defender x pos
 ############
 #end bdb20 code
 
