@@ -66,7 +66,7 @@ library(raster)
 #get location of ball/rusher
 ballocation<-dataframe %>% filter(nflId == returnerId) %>% dplyr::select(c(comb_id, frameId, x_std, y_std))
 #join balllocation x,y as new variables
-IPWorking<-dataframe %>% dplyr::filter(isOnOffense ==F)%>%
+IPWorking<-dataframe %>% dplyr::filter(isOnOffense ==F & team != "football")%>%
   left_join(ballocation, by = c("comb_id", "frameId"))
 linesstore<-NULL
 #for each row calculate distance from ball                     
@@ -78,8 +78,24 @@ IPWorking_Def<-IPWorking %>%
   group_by(comb_id, frameId) %>%
     mutate(lineorder = order(order(linelength, decreasing=F)), returner_x = x_std.x) %>% 
     dplyr::select("comb_id", "frameId", "lineorder", "x" ) %>% 
-                  pivot_wider(names_from = lineorder, values_from = x)%>%
-  left_join(ballocation, by = c("comb_id", "frameId"))
+    pivot_wider(names_from = lineorder, values_from = x)%>%
+    left_join(ballocation, by = c("comb_id", "frameId"))
+
+reception <- c("kick_received", "pass_outcome_caught", "punt_received", "kick_recovered" )
+play_over <- c("out_of_bounds", "tackle", "fumble_offense_recovered", "touchdown", "punt_downed", "first_contact", "safety")
+
+#filter df so it only has events contained in snap/forward passes/sacks
+df_merged <- dataframe %>% mutate(play_type = case_when(
+  event %in% reception ~ "received",
+  event %in% play_over ~ "play_over"))
+df_merged <- df_merged %>% filter(!is.na(play_type))
+df_smaller <-distinct(df_merged, gameId, playId, frameId, .keep_all = TRUE)%>% 
+  dplyr::select(gameId, playId, frameId, play_type )
+df_smaller <- df_smaller %>% group_by(gameId, playId) %>%
+  pivot_wider(id_cols = c(gameId, playId),names_from = play_type, values_from = frameId, values_fn = min)
+
+#remove instances without both a reception and an end event
+df_smaller <- df_smaller[rowSums(is.na(df_smaller))<1,]
 
 # have wide frame of defender x pos
 ############
