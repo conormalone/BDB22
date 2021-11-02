@@ -36,7 +36,7 @@ rm(all_tracking)
 #combine game and play dfs
 
 #add returner to tracking
-return_tracking <-merge(x = return_tracking, y = return_plays[ ,c("comb_id", "kickReturnYardage", "returnerId", "possessionTeam","homeTeamAbbr")], by = "comb_id", all.x=TRUE)
+return_tracking <-merge(x = return_tracking, y = return_plays[ ,c("comb_id", "kickReturnYardage", "returnerId", "possessionTeam","homeTeamAbbr", "specialTeamsPlayType")], by = "comb_id", all.x=TRUE)
 
 
 #preprocessing to add some useful variables
@@ -57,12 +57,10 @@ pre_processing_function <- function(df){
 dataframe<-pre_processing_function(return_tracking)
 
 ##########################
-#decide how to subset the data and put that here
-#get returner dist to other players ahead of him for each frame, take frames where dist is within say 5 yards
+#get returner dist to other players ahead of him for each frame,
 #from original BDB20
 library(sp)
 library(raster)
-#train_1<-dataframe %>% tidyr::fill(c(comb_id, frameId,  x_std, y_std))
 #get location of ball/rusher
 ballocation<-dataframe %>% filter(nflId == returnerId) %>% dplyr::select(c(comb_id, frameId, x_std, y_std))
 #join balllocation x,y as new variables
@@ -73,29 +71,48 @@ linesstore<-NULL
 linesstore<-apply(IPWorking, 1, function(x) dist(rbind(c(x["x_std.x"], x["y_std.x"]), c(x["x_std.y"], x["y_std.y"])), method = "euclidean" )[1])
 #store distance from ball as new variable
 IPWorking$linelength<-linesstore 
-#subset for defense and order by distance from rusher
-IPWorking_Def<-IPWorking %>%
+#subset for defense and order by distance from returner
+wide_dist_to_returner<-IPWorking %>%
   group_by(comb_id, frameId) %>%
-    mutate(lineorder = order(order(linelength, decreasing=F)), returner_x = x_std.x) %>% 
-    dplyr::select("comb_id", "frameId", "lineorder", "x" ) %>% 
-    pivot_wider(names_from = lineorder, values_from = x)%>%
+    mutate(lineorder = order(order(linelength, decreasing=T))) %>% 
+    dplyr::select("comb_id", "frameId", "lineorder", "nflId" ) %>% 
+    pivot_wider(names_from = lineorder, values_from = nflId)%>%
     left_join(ballocation, by = c("comb_id", "frameId"))
 
+
+#sort events into reception (start) and play_over (end) to only examine relevant frames
 reception <- c("kick_received", "pass_outcome_caught", "punt_received", "kick_recovered" )
 play_over <- c("out_of_bounds", "tackle", "fumble_offense_recovered", "touchdown", "punt_downed", "first_contact", "safety")
 
-#filter df so it only has events contained in snap/forward passes/sacks
+#filter df so it only has events contained in reception/playover
 df_merged <- dataframe %>% mutate(play_type = case_when(
   event %in% reception ~ "received",
   event %in% play_over ~ "play_over"))
 df_merged <- df_merged %>% filter(!is.na(play_type))
-df_smaller <-distinct(df_merged, gameId, playId, frameId, .keep_all = TRUE)%>% 
-  dplyr::select(gameId, playId, frameId, play_type )
-df_smaller <- df_smaller %>% group_by(gameId, playId) %>%
-  pivot_wider(id_cols = c(gameId, playId),names_from = play_type, values_from = frameId, values_fn = min)
+df_in_play <-distinct(df_merged, comb_id, frameId, .keep_all = TRUE)%>% 
+  dplyr::select(comb_id, frameId, play_type )
+df_in_play <- df_in_play %>% group_by(comb_id) %>%
+  pivot_wider(id_cols = c(comb_id),names_from = play_type, values_from = frameId, values_fn = max)
 
 #remove instances without both a reception and an end event
-df_smaller <- df_smaller[rowSums(is.na(df_smaller))<1,]
+df_in_play <- df_in_play[rowSums(is.na(df_in_play))<1,]
+
+#set combids as factors
+df_in_play$comb_id <- as.factor(df_in_play$comb_id)
+wide_dist_to_returner$comb_id <- as.factor(wide_dist_to_returner$comb_id)
+#loop to subset the nearest player matrix to just between reception and tackle
+nearest_player_reception_to_tackle <- data.frame()
+result <- data.frame()
+
+for(i in 1:length(levels(df_in_play$comb_id))){
+  wide_dist_to_returner_just_combid <- wide_dist_to_returner %>% 
+    filter(comb_id ==levels(df_in_play$comb_id)[i])
+  
+  result <- wide_dist_to_returner_just_combid %>% 
+    filter(comb_id == df_in_play$comb_id && frameId >= df_in_play$received && frameId <= df_in_play$play_over)
+  
+  nearest_player_reception_to_tackle <- rbind(nearest_player_reception_to_tackle, result)
+} 
 
 # have wide frame of defender x pos
 ############
