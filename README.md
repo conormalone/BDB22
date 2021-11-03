@@ -3,18 +3,18 @@ NFL Big Data Bowl 2022(Special Teams)
 predicting return distance using graph network (nodes for returner, return team and kicking team)
 then CV graphs to ascertain yards added by blockers or kickers
 
-v2 with secure SSH
-
 Done:
-(8/10) import
-(8/10) subset to just return plays
+(2/11)Df with graph feature (pint or kickoff)
+(2/11)Wide df by frame to take just passes
+(2/11) df with start and end points
+(2/11)Get data between start and end
+...
+(2/11)Graph code
 
 
 To Do:
-(8/10) select relevant frames from return plays
-(8/10) get distance to all other players "for(i in 1:nrow(IPWorking)){
-  linesstore[i]<-pointDistance(c(IPWorking$X_std.x[i], IPWorking$Y_std.x[i]), c(IPWorking$X_std.y[i], IPWorking$Y_std.y[i]),lonlat=F )
-}" FROM FUMBLESWORKING
-(8/10) set up graph
-(8/10) GNN Model
-(8/10) predit Leave-One-Out blockers
+
+
+(2/11)Get just data from packed runs
+(2/11)Do training test split (1 year as test?)
+

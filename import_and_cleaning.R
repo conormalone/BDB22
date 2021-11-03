@@ -105,16 +105,24 @@ nearest_player_reception_to_tackle <- data.frame()
 result <- data.frame()
 
 for(i in 1:length(levels(df_in_play$comb_id))){
-  wide_dist_to_returner_just_combid <- wide_dist_to_returner %>% 
-    filter(comb_id ==levels(df_in_play$comb_id)[i])
-  
+  wide_dist_to_returner_just_combid <- wide_dist_to_returner[wide_dist_to_returner$comb_id ==levels(df_in_play$comb_id)[i],] 
+  df_in_play_just_combid <- df_in_play[df_in_play$comb_id == levels(df_in_play$comb_id)[i],] 
   result <- wide_dist_to_returner_just_combid %>% 
-    filter(comb_id == df_in_play$comb_id && frameId >= df_in_play$received && frameId <= df_in_play$play_over)
+    filter(comb_id == df_in_play_just_combid$comb_id && frameId >= df_in_play_just_combid$received && frameId <= df_in_play_just_combid$play_over)
   
   nearest_player_reception_to_tackle <- rbind(nearest_player_reception_to_tackle, result)
 } 
-
 # have wide frame of defender x pos
+#get frames where kicking team players are packed
+nearest_player_reception_to_tackle$lag <- lag(nearest_player_reception_to_tackle$`1`)
+nearest_player_reception_to_tackle$diff <- nearest_player_reception_to_tackle$lag != nearest_player_reception_to_tackle$`1`
+
+packed_frames <- nearest_player_reception_to_tackle %>% filter(diff) %>% dplyr::select(comb_id, frameId)
+
+df_in_play_renamed <-rename(df_in_play, frameId = received) 
+packed_frames_inc_start <- unique(rbind(packed_frames,df_in_play_renamed[c("comb_id", "frameId")] ))
+  
+length(levels(droplevels(packed_frames_inc_start$comb_id)))
 ############
 #end bdb20 code
 
