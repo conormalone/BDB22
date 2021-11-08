@@ -1,4 +1,5 @@
 library(tidyverse)
+set.seed(1234)
 #import files needed now and set factors
 plays <- read.csv("plays.csv")
 games <- read.csv("games.csv")
@@ -89,13 +90,23 @@ df_merged <- dataframe %>% mutate(play_type = case_when(
   event %in% reception ~ "received",
   event %in% play_over ~ "play_over"))
 df_merged <- df_merged %>% filter(!is.na(play_type))
-df_in_play <-distinct(df_merged, comb_id, frameId, .keep_all = TRUE)%>% 
+df_in_play_long <-distinct(df_merged, comb_id, frameId, .keep_all = TRUE)%>% 
   dplyr::select(comb_id, frameId, play_type )
-df_in_play <- df_in_play %>% group_by(comb_id) %>%
+df_in_play <- df_in_play_long %>% group_by(comb_id) %>%
   pivot_wider(id_cols = c(comb_id),names_from = play_type, values_from = frameId, values_fn = max)
 
 #remove instances without both a reception and an end event
 df_in_play <- df_in_play[rowSums(is.na(df_in_play))<1,]
+
+
+
+#get location of returner to get total return distance to go
+df_play_dist <- df_in_play_long  %>% left_join(ballocation, by = c("comb_id", "frameId"))%>% 
+  group_by(comb_id) %>% #filter(play_type == "received")%>%
+  pivot_wider(id_cols = c(comb_id),names_from = play_type, values_from = x_std, values_fn = min) #%>% 
+  #mutate(play_dist = ceiling(received - play_over))
+
+
 
 #set combids as factors
 df_in_play$comb_id <- as.factor(df_in_play$comb_id)
@@ -121,10 +132,32 @@ packed_frames <- nearest_player_reception_to_tackle %>% filter(diff) %>% dplyr::
 
 df_in_play_renamed <-rename(df_in_play, frameId = received) 
 packed_frames_inc_start <- unique(rbind(packed_frames,df_in_play_renamed[c("comb_id", "frameId")] ))
-  
-length(levels(droplevels(packed_frames_inc_start$comb_id)))
-############
-#end bdb20 code
+droplevels(packed_frames_inc_start$comb_id)  
+length(levels(packed_frames_inc_start$comb_id))
+
+#now to test / train split and add punt/ko to features
+
+#split on combid so same plays aren't in test and train
+N<-length(levels(packed_frames_inc_start$comb_id))
+trainset<-sort(sample(1:N,size=floor(N*0.70)))
+nottestset<-setdiff(1:N,trainset)
+validset<-sort(sample(nottestset,size=length(nottestset)/2))
+testset<-sort(setdiff(nottestset,validset))
+train_comb_id <-levels(packed_frames_inc_start$comb_id)[trainset]
+val_comb_id <-levels(packed_frames_inc_start$comb_id)[validset]
+test_comb_id <-levels(packed_frames_inc_start$comb_id)[testset]
+#get split in dataframe
+train_data <-dataframe %>% filter(comb_id %in% train_comb_id)
+val_data <-dataframe %>% filter(comb_id %in% val_comb_id)
+test_data <-dataframe %>% filter(comb_id %in% test_comb_id)
+
+
+
+
+
+
+
+
 
 
 
@@ -133,41 +166,54 @@ length(levels(droplevels(packed_frames_inc_start$comb_id)))
 
 
 #code to put in graph format, ties up with python file.
-to_loop <- dataframe %>% dplyr::select(comb_id, kickReturnYardage, x, y) %>% 
-  group_by(PlayId) %>% 
+library(mltools)
+library(data.table)
+graph_processing_function <- function(dataframe){
+df <- dataframe %>% filter(displayName != "football") %>% 
+  left_join(ballocation, by = c("comb_id", "frameId"))%>%
+  left_join(df_play_dist, by = c("comb_id"))%>%
+  unite("comb_and_frame", c(comb_id,frameId), sep= " ",remove = FALSE)%>%
+  mutate(comb_and_frame = as.factor(comb_and_frame), returnYardstoGo = floor(x_std.y - play_over))
+function_graph_list <- list()
+to_loop <- df %>% dplyr::select(comb_and_frame, returnYardstoGo, x, y) %>% 
+  group_by(comb_and_frame) %>% 
   mutate(row = row_number())
 
-yard_loop <- to_loop %>% dplyr::select(comb_id, kickReturnYardage) %>% group_by(comb_id) %>% 
-  summarise(Yards = min(kickReturnYardage))  
+yard_loop <- to_loop %>% dplyr::select(comb_and_frame, returnYardstoGo) %>% group_by(comb_and_frame) %>% 
+  summarise(Yards = min(returnYardstoGo))  
 #loop to get distances between all points (adjacency matrix) (graph.a)
 distance_matrix <- list()  
 froot_loop <- to_loop %>% 
-  dplyr::select(comb_id, x,y, row) %>% 
+  dplyr::select(comb_and_frame, x,y, row) %>% 
   pivot_wider( names_from = row, values_from = c(x,y))
 for(i in 1:nrow(froot_loop)){
-  points <- cbind(c(froot_loop$X_1[i],froot_loop$X_2[i],froot_loop$X_3[i],froot_loop$X_4[i],froot_loop$X_5[i],froot_loop$X_6[i],froot_loop$X_7[i],froot_loop$X_8[i],froot_loop$X_9[i],froot_loop$X_10[i],froot_loop$X_11[i],froot_loop$X_12[i],froot_loop$X_13[i],froot_loop$X_14[i],froot_loop$X_15[i],froot_loop$X_16[i],froot_loop$X_17[i],froot_loop$X_18[i],froot_loop$X_19[i],froot_loop$X_20[i],froot_loop$X_21[i],froot_loop$X_22[i]),
-                  c(froot_loop$Y_1[i],froot_loop$Y_2[i],froot_loop$Y_3[i],froot_loop$Y_4[i],froot_loop$Y_5[i],froot_loop$Y_6[i],froot_loop$Y_7[i],froot_loop$Y_8[i],froot_loop$Y_9[i],froot_loop$Y_10[i],froot_loop$Y_11[i],froot_loop$Y_12[i],froot_loop$Y_13[i],froot_loop$Y_14[i],froot_loop$Y_15[i],froot_loop$Y_16[i],froot_loop$Y_17[i],froot_loop$Y_18[i],froot_loop$Y_19[i],froot_loop$Y_20[i],froot_loop$Y_21[i],froot_loop$Y_22[i]))
+  points <- cbind(c(froot_loop$x_1[i],froot_loop$x_2[i],froot_loop$x_3[i],froot_loop$x_4[i],froot_loop$x_5[i],froot_loop$x_6[i],froot_loop$x_7[i],froot_loop$x_8[i],froot_loop$x_9[i],froot_loop$x_10[i],froot_loop$x_11[i],froot_loop$x_12[i],froot_loop$x_13[i],froot_loop$x_14[i],froot_loop$x_15[i],froot_loop$x_16[i],froot_loop$x_17[i],froot_loop$x_18[i],froot_loop$x_19[i],froot_loop$x_20[i],froot_loop$x_21[i],froot_loop$x_22[i]),
+                  c(froot_loop$y_1[i],froot_loop$y_2[i],froot_loop$y_3[i],froot_loop$y_4[i],froot_loop$y_5[i],froot_loop$y_6[i],froot_loop$y_7[i],froot_loop$y_8[i],froot_loop$y_9[i],froot_loop$y_10[i],froot_loop$y_11[i],froot_loop$y_12[i],froot_loop$y_13[i],froot_loop$y_14[i],froot_loop$y_15[i],froot_loop$y_16[i],froot_loop$y_17[i],froot_loop$y_18[i],froot_loop$y_19[i],froot_loop$y_20[i],froot_loop$y_21[i],froot_loop$y_22[i]))
   distance_result <- as.matrix(pointDistance(points,points, lonlat=F, allpairs =T))
   distance_matrix[[i]] <-distance_result
 }
 
 #get node features(graph.x)
 #get S and R D B for every play (2 node features)
-features_set <- dataframe %>% mutate(node_type = case_when(
+features_set <- df %>% mutate(node_type = case_when(
   isBallCarrier ~ "R",
   isOnOffense ~ "B",
   isOnOffense ==F ~ "D")) %>% 
-  dplyr::select(comb_id, s, node_type)
+  dplyr::select(comb_and_frame, s, node_type, specialTeamsPlayType)
 features_set$node_type <- as.factor(features_set$node_type)
-library(mltools)
-library(data.table)
-features_set <-one_hot(data.table(features_set),cols = "node_type")
+features_set$specialTeamsPlayType <- droplevels(features_set$specialTeamsPlayType)
+features_set <-one_hot(data.table(features_set),cols = c("node_type", "specialTeamsPlayType"))
 
 
 features_list <- list()  
-for(i in 1:length(levels(features_set$comb_id))){
-  features_list[[i]] <- features_set[features_set$PlayId == levels(features_set$comb_id)[i],c(2:5)]
+for(i in 1:length(levels(features_set$comb_and_frame))){
+  features_list[[i]] <- features_set[features_set$comb_and_frame == levels(features_set$comb_and_frame)[i],c(2:7)]
 }
 
 YardList <- yard_loop$Yards
-     
+function_graph_list <-c(YardList, features_list, distance_matrix)
+
+return(function_graph_list)
+} 
+trial1 <-graph_processing_function(test_data)     
+
