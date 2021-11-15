@@ -211,9 +211,16 @@ for(i in 1:length(levels(features_set$comb_and_frame))){
 }
 
 YardList <- yard_loop$Yards
-function_graph_list <-c(YardList, features_list, distance_matrix)
+function_graph_list <-list(y = YardList, x = features_list, a = distance_matrix)
 
 return(function_graph_list)
 } 
-trial1 <-graph_processing_function(test_data)     
+test <-graph_processing_function(test_data)     
+train <-graph_processing_function(train_data)     
+validate <-graph_processing_function(val_data)     
 
+library(reticulate)
+source_python("python_load_and_train_graph.py")
+
+
+predictions <- py$model$predict(loader_all$load(), steps = loader_all$steps_per_epoch)
