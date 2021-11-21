@@ -26,25 +26,27 @@ local_val = r.validate
 class GraphDataset(Dataset):
     def __init__(self, n_samples, df, n_colors=120, **kwargs):
         self.n_samples = n_samples
+        self.df = df  
         self.n_colors = n_colors  
-        self.df = df    
         super().__init__(**kwargs)
 
     def read(self):
         output = []
+        #df_subset_x = self.df[1]
+        #df_subset_a = self.df[2]
+        #df_subset_y = self.df[0]
         for i in range(self.n_samples):
             # Node features
-            df_subset = self.df[i]
-            iter_x = df_subset[1]
-            x = np.array(iter_x).reshape(22,4)
+            iter_x = self.df["x"][i].copy()
+            x = np.array(iter_x).reshape(22,6)
 
             # Edges
-            iter_a =  df_subset[2]
+            iter_a =  self.df["a"][i].copy()
             a = np.array(iter_a).reshape(22,22)
 
             # 
             y = np.zeros((120,))
-            y_index = int(19+df_subset[0])
+            y_index = int(19+self.df["y"][i])
             y[y_index:] = 1
            
             output.append(Graph(x=x, a=a, y=y))
@@ -55,9 +57,12 @@ class GraphDataset(Dataset):
 
  #
 # Train/valid/test split
-data_tr = GraphDataset(len(local_train[1]), df=local_train, transforms=NormalizeAdj())
-data_va = GraphDataset(len(local_val[1]), df=local_val, transforms=NormalizeAdj())
-data_te = GraphDataset(len(local_test[1]), df=local_test, transforms=NormalizeAdj())
+len_train = len(local_train["x"])
+len_val = len(local_val["x"])
+len_test = len(local_test["x"])
+data_tr = GraphDataset(n_samples = len_train, df = local_train, transforms=NormalizeAdj())
+data_va = GraphDataset(n_samples = len_val, df = local_val, transforms=NormalizeAdj())
+data_te = GraphDataset(n_samples = len_test, df=local_test, transforms=NormalizeAdj())
 
 # Data loaders
 loader_tr = BatchLoader(data_tr, batch_size=batch_size, epochs=epochs)

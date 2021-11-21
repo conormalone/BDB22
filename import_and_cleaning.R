@@ -16,6 +16,7 @@ plays$specialTeamsPlayType <- as.factor(plays$specialTeamsPlayType)
 plays$specialTeamsResult <- as.factor(plays$specialTeamsResult)
 plays$gameId <- as.factor(plays$gameId)
 plays$playId <- as.factor(plays$playId)
+plays$returnerId <-sub("\\;.*", "", plays$returnerId)
 games$gameId <- as.factor(games$gameId)
 all_tracking$gameId <- as.factor(all_tracking$gameId)
 all_tracking$playId <- as.factor(all_tracking$playId)
@@ -147,7 +148,7 @@ train_comb_id <-levels(packed_frames_inc_start$comb_id)[trainset]
 val_comb_id <-levels(packed_frames_inc_start$comb_id)[validset]
 test_comb_id <-levels(packed_frames_inc_start$comb_id)[testset]
 #get split in dataframe
-train_data <-dataframe %>% filter(comb_id %in% train_comb_id)
+train_data <-dataframe %>% filter(comb_id %in% train_comb_id) %>% filter(comb_id != "2019090900 3818")
 val_data <-dataframe %>% filter(comb_id %in% val_comb_id)
 test_data <-dataframe %>% filter(comb_id %in% test_comb_id)
 
@@ -218,9 +219,16 @@ return(function_graph_list)
 test <-graph_processing_function(test_data)     
 train <-graph_processing_function(train_data)     
 validate <-graph_processing_function(val_data)     
-
+rm(list = setdiff(ls(),c("test_data","train_data","val_data","test","train","validate")))
 library(reticulate)
 source_python("python_load_and_train_graph.py")
+#source_python("py_test.py")
+train[["y"]][152148]
+train_data[152148,]
+length(levels(as.factor(train_data$comb_id)))
 
 
-predictions <- py$model$predict(loader_all$load(), steps = loader_all$steps_per_epoch)
+py$
+#predictions <- py$model$predict(loader_te$load(), steps = loader_te$steps_per_epoch)
+bler <- py$local_val
+bler[[y]]
