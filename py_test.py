@@ -47,11 +47,11 @@ class GraphDataset(Dataset):
         for i in range(self.n_samples):
             # Node features
             iter_x = self.df["x"][i].copy()
-            x = np.array(iter_x).reshape(22,6)
+            x = np.array(iter_x).reshape(21,6)
 
             # Edges
             iter_a =  self.df["a"][i].copy()
-            a = np.array(iter_a).reshape(22,22)
+            a = np.array(iter_a).reshape(21,21)
 
             # 
             y = np.zeros((120,))

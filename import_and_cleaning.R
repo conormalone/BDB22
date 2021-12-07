@@ -133,20 +133,23 @@ nearest_player_reception_to_tackle$lag <- lag(nearest_player_reception_to_tackle
 nearest_player_reception_to_tackle$diff <- nearest_player_reception_to_tackle$lag != nearest_player_reception_to_tackle$`1`
 
 packed_frames <- nearest_player_reception_to_tackle %>% filter(diff) %>% dplyr::select(comb_id, frameId)
-
 df_in_play_renamed <-rename(df_in_play, frameId = received) 
 packed_frames_inc_start <- unique(rbind(packed_frames,df_in_play_renamed[c("comb_id", "frameId")] ))
-droplevels(packed_frames_inc_start$comb_id)  
+packed_frames_inc_start$comb_id <- droplevels(packed_frames_inc_start$comb_id) 
+packed_frames_list <-paste0(packed_frames_inc_start$comb_id," ", packed_frames_inc_start$frameId)
+
+
+ 
 #length(levels(packed_frames_inc_start$comb_id))
 
 #now to test / train split and add punt/ko to features
 
 #split on combid so same plays aren't in test and train
-#N<-length(levels(packed_frames_inc_start$comb_id))
-#trainset<-sort(sample(1:N,size=floor(N*0.70)))
-#nottestset<-setdiff(1:N,trainset)
-#validset<-sort(sample(nottestset,size=length(nottestset)/2))
-#testset<-sort(setdiff(nottestset,validset))
+N<-length(levels(packed_frames_inc_start$comb_id))
+trainset<-sort(sample(1:N,size=floor(N*0.70)))
+nottestset<-setdiff(1:N,trainset)
+validset<-sort(sample(nottestset,size=length(nottestset)/2))
+testset<-sort(setdiff(nottestset,validset))
 #train_comb_id <-levels(packed_frames_inc_start$comb_id)[trainset]
 #val_comb_id <-levels(packed_frames_inc_start$comb_id)[validset]
 #test_comb_id <-levels(packed_frames_inc_start$comb_id)[testset]
@@ -192,7 +195,9 @@ graph_processing_function <- function(dataframe){
       isBallCarrier ~ "R",
       isOnOffense ~ "B",
       isOnOffense ==F ~ "D"), row = rank(linelength, ties.method= "random"))%>% 
+    filter(comb_and_frame %in% packed_frames_list) %>% 
     dplyr::select(comb_and_frame, returnYardstoGo,nflId,isBallCarrier,isOnOffense, s, node_type, specialTeamsPlayType, x, y, row) 
+  to_loop$comb_and_frame <- droplevels(to_loop$comb_and_frame)
   to_loop$node_type <- as.factor(to_loop$node_type)
   to_loop$specialTeamsPlayType <- droplevels(to_loop$specialTeamsPlayType)
   to_loop <-one_hot(data.table(to_loop),cols = c("node_type", "specialTeamsPlayType"))
@@ -227,7 +232,7 @@ features_list <- by(to_loop, to_loop$comb_and_frame, function(x) dplyr::select(x
     who_are_blockers_df <- blocker_loop %>% filter(comb_and_frame== froot_loop$comb_and_frame[i]) %>% 
       dplyr::select(row)
     who_are_blockers_list <-as.vector(who_are_blockers_df$row)
-    for(j in length(who_are_blockers_list)){
+    for(j in 1:length(who_are_blockers_list)){
     loo_feature_list[[i]][[j]] <-features_list[[i]][-(who_are_blockers_list[j])]
     loo_matrix[[i]][[j]] <- matrix(dist_matrix[,i],22,22)
     loo_matrix[[i]][[j]] <-loo_matrix[[i]][[j]][-(who_are_blockers_list[j]),]
@@ -242,15 +247,23 @@ features_list <- by(to_loop, to_loop$comb_and_frame, function(x) dplyr::select(x
     training_features_list <- by(training_to_loop, training_to_loop$comb_and_frame, function(x) dplyr::select(x,c("s","node_type_B","node_type_D","node_type_R","specialTeamsPlayType_Kickoff","specialTeamsPlayType_Punt")))
     training_dist_matrix <-apply(training_froot_loop, 1, function(x) pointDistance(cbind(c(x["x_1"] ,x["x_2"] ,x["x_3"] ,x["x_4"] ,x["x_5"] ,x["x_6"] ,x["x_7"] ,x["x_8"] ,x["x_9"] ,x["x_10"] ,x["x_11"] ,x["x_12"] ,x["x_13"] ,x["x_14"] ,x["x_15"] ,x["x_16"] ,x["x_17"] ,x["x_18"] ,x["x_19"] ,x["x_20"] ,x["x_21"]),
                                                                        c(x["y_1"] ,x["y_2"] ,x["y_3"] ,x["y_4"] ,x["y_5"] ,x["y_6"] ,x["y_7"] ,x["y_8"] ,x["y_9"] ,x["y_10"] ,x["y_11"] ,x["y_12"] ,x["y_13"] ,x["y_14"] ,x["y_15"] ,x["y_16"] ,x["y_17"] ,x["y_18"] ,x["y_19"] ,x["y_20"] ,x["y_21"] )), cbind(c(x["x_1"] ,x["x_2"] ,x["x_3"] ,x["x_4"] ,x["x_5"] ,x["x_6"] ,x["x_7"] ,x["x_8"] ,x["x_9"] ,x["x_10"] ,x["x_11"] ,x["x_12"] ,x["x_13"] ,x["x_14"] ,x["x_15"] ,x["x_16"] ,x["x_17"] ,x["x_18"] ,x["x_19"] ,x["x_20"] ,x["x_21"] ),
-                                                                                                                                                                                                                                                                                                                           c(x["y_1"] ,x["y_2"] ,x["y_3"] ,x["y_4"] ,x["y_5"] ,x["y_6"] ,x["y_7"] ,x["y_8"] ,x["y_9"] ,x["y_10"] ,x["y_11"] ,x["y_12"] ,x["y_13"] ,x["y_14"] ,x["y_15"] ,x["y_16"] ,x["y_17"] ,x["y_18"] ,x["y_19"] ,x["y_20"] ,x["y_21"] )), lonlat=F, allpairs =T))  
- 
+
+                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                                       c(x["y_1"] ,x["y_2"] ,x["y_3"] ,x["y_4"] ,x["y_5"] ,x["y_6"] ,x["y_7"] ,x["y_8"] ,x["y_9"] ,x["y_10"] ,x["y_11"] ,x["y_12"] ,x["y_13"] ,x["y_14"] ,x["y_15"] ,x["y_16"] ,x["y_17"] ,x["y_18"] ,x["y_19"] ,x["y_20"] ,x["y_21"] )), lonlat=F, allpairs =T))  
+    
+    
+    train_matrix <-list()
+    for(i in 1:nrow(training_froot_loop)){
+      train_matrix[[i]] <-list()
+      train_matrix[[i]] <- matrix(training_dist_matrix[,i],21,21)
+      }
+    
   yard_loop <- to_loop %>% dplyr::select(comb_and_frame, returnYardstoGo) %>% group_by(comb_and_frame) %>% 
     summarise(Yards = min(returnYardstoGo))  
   
   YardList <- yard_loop$Yards
   #catch any remaining errors, 
   YardList[is.na(YardList)] <- 0
-  function_graph_list <-list(ids = id_loop, y = YardList, train_x = training_features_list, train_a = training_dist_matrix, loo_a = loo_matrix, loo_x = loo_feature_list)
+  function_graph_list <-list(ids = id_loop, y = YardList, train_x = training_features_list, train_a = train_matrix, loo_a = loo_matrix, loo_x = loo_feature_list)
   
   return(function_graph_list)
 } 
@@ -259,7 +272,23 @@ features_list <- by(to_loop, to_loop$comb_and_frame, function(x) dplyr::select(x
 #validate <-graph_processing_function(val_data)
 all_data <-graph_processing_function(dataframe)
 rm(list = setdiff(ls(),c("dataframe","all_data")))
+
+#get test train split
+
+test_rows <- packed_frames_inc_start$comb_id %in%packed_frames_inc_start$comb_id[testset]
+train_rows <- packed_frames_inc_start$comb_id %in%packed_frames_inc_start$comb_id[trainset]
+val_rows <- packed_frames_inc_start$comb_id %in%packed_frames_inc_start$comb_id[validset]
+
+test <-list(ids = all_data$ids[test_rows,], y = all_data$y[test_rows], train_x = all_data$train_x[test_rows], train_a = all_data$train_a[test_rows], loo_a = all_data$loo_a[test_rows], loo_x = all_data$loo_x[test_rows])
+train <-list(ids = all_data$ids[train_rows,], y = all_data$y[train_rows], train_x = all_data$train_x[train_rows], train_a = all_data$train_a[train_rows], loo_a = all_data$loo_a[train_rows], loo_x = all_data$loo_x[train_rows])
+validate <-list(ids = all_data$ids[val_rows,], y = all_data$y[val_rows], train_x = all_data$train_x[val_rows], train_a = all_data$train_a[val_rows], loo_a = all_data$loo_a[val_rows], loo_x = all_data$loo_x[val_rows])
+
+sapply(all_data, "[[",2)
+all_data$train_x[1]
+
+
+#run python code
 library(reticulate)
-source_python("python_load_and_train_graph.py")
-#source_python("py_test.py")
+#source_python("python_load_and_train_graph.py")
+source_python("py_test.py")
 model$predict

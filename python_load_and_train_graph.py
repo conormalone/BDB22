@@ -19,6 +19,7 @@ batch_size = 32  # Batch size
 local_train = r.train
 local_test = r.test
 local_val = r.validate
+local_all = r.all_data
 ################################################################################
 # Load data
 ################################################################################
@@ -37,11 +38,11 @@ class GraphDataset(Dataset):
         #df_subset_y = self.df[0]
         for i in range(self.n_samples):
             # Node features
-            iter_x = self.df["x"][i].copy()
+            iter_x = self.df["train_x"][i].copy()
             x = np.array(iter_x).reshape(22,6)
 
             # Edges
-            iter_a =  self.df["a"][i].copy()
+            iter_a =  self.df["train_a"][i].copy()
             a = np.array(iter_a).reshape(22,22)
 
             # 
@@ -57,9 +58,9 @@ class GraphDataset(Dataset):
 
  #
 # Train/valid/test split
-len_train = len(local_train["x"])
-len_val = len(local_val["x"])
-len_test = len(local_test["x"])
+len_train = len(local_train["train_x"])
+len_val = len(local_val["train_x"])
+len_test = len(local_test["train_x"])
 data_tr = GraphDataset(n_samples = len_train, df = local_train, transforms=NormalizeAdj())
 data_va = GraphDataset(n_samples = len_val, df = local_val, transforms=NormalizeAdj())
 data_te = GraphDataset(n_samples = len_test, df=local_test, transforms=NormalizeAdj())
@@ -101,4 +102,32 @@ test_loss = model.evaluate(loader_te.load(), steps=loader_te.steps_per_epoch)
 print('Test loss: {}'.format(test_loss))
 
 
-#predictions = model.predict(loader_te.load(), steps = loader_te.steps_per_epoch)
+class LOOGraphDataset(Dataset):
+    def __init__(self, df, **kwargs):
+        self.df = df  
+        super().__init__(**kwargs)
+
+    def read(self):
+        output = []
+        #df_subset_x = self.df[1]
+        #df_subset_a = self.df[2]
+        #df_subset_y = self.df[0]
+        for i in range(len(self.df["loo_x"])):
+            # Node features
+            iter_x = self.df["loo_x"][i].copy()
+            x = np.array(iter_x).reshape(21,6)
+            y = np.zeros((120,))
+            y_index = int(19+self.df["y"][i])
+            y[y_index:] = 1
+            for j in range(self.df["loo_a"].shape[1]):
+                # Edges
+                iter_a =  self.df["loo_a"][i][j].copy()
+                a = np.array(iter_a).reshape(21,21)
+
+            
+                output.append(Graph(x=x, a=a, y=y))
+        len_all = self.df["loo_a"].shape[0] * self.df["loo_a"].shape[1] 
+        output_compiler = GraphDataset(n_samples = len_all, df = output, transforms=NormalizeAdj())
+        loo_loader = BatchLoader(output_compiler, batch_size=batch_size)
+        predictions = model.predict(loo_loader)
+        return(predictions)        
