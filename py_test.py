@@ -1,10 +1,4 @@
 # -*- coding: utf-8 -*-
-"""
-Created on Tue Nov 16 14:35:10 2021
-
-@author: conny
-"""
-
 import numpy as np
 import tensorflow
 import spektral
@@ -14,7 +8,6 @@ from spektral.data import Dataset, BatchLoader, Graph
 from spektral.transforms.normalize_adj import NormalizeAdj
 from tensorflow.keras.layers import Dropout
 from spektral.layers import GCNConv, GlobalSumPool
-from sklearn.model_selection import GroupShuffleSplit
 
 ################################################################################
 # Config
@@ -23,11 +16,11 @@ learning_rate = 1e-2  # Learning rate
 epochs = 100  # Number of training epochs
 es_patience = 10  # Patience for early stopping
 batch_size = 32  # Batch size
-local_data = r.dataset
-################################################################################
-# Test Train Split
-################################################################################
-X_train, X_test, y_train, y_test = train_test_split(X, y, test_size=0.1, stratify=df['Unique ID'].values)
+local_all = r.all_data
+local_test = r.test
+local_train = r.train
+local_val = r.validate
+
 ################################################################################
 # Load data
 ################################################################################
@@ -41,16 +34,13 @@ class GraphDataset(Dataset):
 
     def read(self):
         output = []
-        #df_subset_x = self.df[1]
-        #df_subset_a = self.df[2]
-        #df_subset_y = self.df[0]
         for i in range(self.n_samples):
             # Node features
-            iter_x = self.df["x"][i].copy()
+            iter_x = self.df["train_x"][i].copy()
             x = np.array(iter_x).reshape(21,6)
 
             # Edges
-            iter_a =  self.df["a"][i].copy()
+            iter_a =  self.df["train_a"][i].copy()
             a = np.array(iter_a).reshape(21,21)
 
             # 
@@ -66,13 +56,19 @@ class GraphDataset(Dataset):
 
  #
 # Train/valid/test split
-len_test = len(local_test["x"])
-len_val = len(local_val["x"])
-data_te = GraphDataset(n_samples = len_test, df=local_test, transforms=NormalizeAdj())
+len_train = len(local_train["train_x"])
+len_val = len(local_val["train_x"])
+len_test = len(local_test["train_x"])
+
+data_tr = GraphDataset(n_samples = len_train, df = local_train, transforms=NormalizeAdj())
 data_va = GraphDataset(n_samples = len_val, df = local_val, transforms=NormalizeAdj())
+data_te = GraphDataset(n_samples = len_test, df=local_test, transforms=NormalizeAdj())
+
 # Data loaders
-loader_te = BatchLoader(data_te, batch_size=batch_size)
+loader_tr = BatchLoader(data_tr, batch_size=batch_size, epochs=epochs)
 loader_va = BatchLoader(data_va, batch_size=batch_size)
+loader_te = BatchLoader(data_te, batch_size=batch_size)
+
 ################################################################################
 # Build model
 ################################################################################
@@ -97,32 +93,40 @@ class MyFirstGNN(Model):
 model = MyFirstGNN(32, 120)
 model.compile('adam', "mean_squared_error")
 
-class LOOGraphDataset(Dataset):
-    def __init__(self, df, **kwargs):
-        self.df = df  
+model.fit(loader_tr.load(), validation_data= loader_va.load(), steps_per_epoch=loader_tr.steps_per_epoch,
+    validation_steps=loader_va.steps_per_epoch, epochs=100)
+
+test_loss = model.evaluate(loader_te.load(), steps=loader_te.steps_per_epoch)
+
+print('Test loss: {}'.format(test_loss))
+
+len_all = 13663
+len_1 = 136630
+class LooGraphDataset(Dataset):
+    def __init__(self, loo_n_samples, loo_df, **kwargs):
+        self.loo_n_samples = loo_n_samples
+        self.loo_df = loo_df  
         super().__init__(**kwargs)
 
     def read(self):
         output = []
-        #df_subset_x = self.df[1]
-        #df_subset_a = self.df[2]
-        #df_subset_y = self.df[0]
-        for i in range(len(self.df["loo_x"])):
+        for i in range(self.loo_n_samples):
             # Node features
-            iter_x = self.df["loo_x"][i].copy()
-            x = np.array(iter_x).reshape(21,6)
             y = np.zeros((120,))
-            y_index = int(19+self.df["y"][i])
+            y_index = int(19+self.loo_df["y"][i])
             y[y_index:] = 1
-            for j in range(self.df["loo_a"].shape[1]):
+            for j in range(10):
+                iter_x = self.loo_df["loo_x"][i][j].copy()
+                x = np.array(iter_x).reshape(21,6)
                 # Edges
-                iter_a =  self.df["loo_a"][i][j].copy()
+                iter_a = self.loo_df["loo_a"][i][j].copy()
                 a = np.array(iter_a).reshape(21,21)
-
             
                 output.append(Graph(x=x, a=a, y=y))
-        len_all = self.df["loo_a"].shape[0] * self.df["loo_a"].shape[1] 
-        output_compiler = GraphDataset(n_samples = len_all, df = output, transforms=NormalizeAdj())
-        loo_loader = BatchLoader(output_compiler, batch_size=batch_size)
-        predictions = model.predict(loo_loader)
-        return(predictions)        
+        return(output)        
+        
+output_compiler = LooGraphDataset(loo_n_samples = len_all, loo_df = local_all, transforms=NormalizeAdj())
+loo_loader = BatchLoader(output_compiler, batch_size=batch_size)
+predictions = model.predict(loo_loader.load(), steps =loo_loader.steps_per_epoch)
+
+

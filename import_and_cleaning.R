@@ -204,8 +204,7 @@ graph_processing_function <- function(dataframe){
   
   
   #loop to get distances between all points (adjacency matrix) (graph.a)
-  loo_matrix <- list()  
-  loo_feature_list <- list()
+  
   froot_loop <- to_loop %>% 
     dplyr::select(comb_and_frame, x,y, row) %>% 
     pivot_wider( names_from = row, values_from = c(x,y))
@@ -222,9 +221,8 @@ graph_processing_function <- function(dataframe){
                                                                      c(x["y_1"] ,x["y_2"] ,x["y_3"] ,x["y_4"] ,x["y_5"] ,x["y_6"] ,x["y_7"] ,x["y_8"] ,x["y_9"] ,x["y_10"] ,x["y_11"] ,x["y_12"] ,x["y_13"] ,x["y_14"] ,x["y_15"] ,x["y_16"] ,x["y_17"] ,x["y_18"] ,x["y_19"] ,x["y_20"] ,x["y_21"] ,x["y_22"] )), cbind(c(x["x_1"] ,x["x_2"] ,x["x_3"] ,x["x_4"] ,x["x_5"] ,x["x_6"] ,x["x_7"] ,x["x_8"] ,x["x_9"] ,x["x_10"] ,x["x_11"] ,x["x_12"] ,x["x_13"] ,x["x_14"] ,x["x_15"] ,x["x_16"] ,x["x_17"] ,x["x_18"] ,x["x_19"] ,x["x_20"] ,x["x_21"] ,x["x_22"] ),
                                                                                                                                                                                                                                                                                                                          c(x["y_1"] ,x["y_2"] ,x["y_3"] ,x["y_4"] ,x["y_5"] ,x["y_6"] ,x["y_7"] ,x["y_8"] ,x["y_9"] ,x["y_10"] ,x["y_11"] ,x["y_12"] ,x["y_13"] ,x["y_14"] ,x["y_15"] ,x["y_16"] ,x["y_17"] ,x["y_18"] ,x["y_19"] ,x["y_20"] ,x["y_21"] ,x["y_22"] )), lonlat=F, allpairs =T))
   #attempting loo matrix
-  #need to fix
-  #
-  #j should just be defenders
+loo_matrix <- list()  
+loo_feature_list <- list()
 features_list <- by(to_loop, to_loop$comb_and_frame, function(x) dplyr::select(x,c("s","node_type_B","node_type_D","node_type_R","specialTeamsPlayType_Kickoff","specialTeamsPlayType_Punt")))  
   for(i in 1:nrow(froot_loop)){
     loo_matrix[[i]] <-list()
@@ -244,7 +242,12 @@ features_list <- by(to_loop, to_loop$comb_and_frame, function(x) dplyr::select(x
     training_froot_loop <- training_to_loop %>% 
       dplyr::select(comb_and_frame, x,y, row) %>% 
       pivot_wider( names_from = row, values_from = c(x,y))
-    training_features_list <- by(training_to_loop, training_to_loop$comb_and_frame, function(x) dplyr::select(x,c("s","node_type_B","node_type_D","node_type_R","specialTeamsPlayType_Kickoff","specialTeamsPlayType_Punt")))
+    training_features_list_by <- by(training_to_loop, training_to_loop$comb_and_frame, function(x) dplyr::select(x,c("s","node_type_B","node_type_D","node_type_R","specialTeamsPlayType_Kickoff","specialTeamsPlayType_Punt")))
+    training_features_list <- list()
+    for(i in 1:nrow(training_froot_loop)){
+      training_features_list[[i]] <-training_features_list_by[[i]]
+    }
+    
     training_dist_matrix <-apply(training_froot_loop, 1, function(x) pointDistance(cbind(c(x["x_1"] ,x["x_2"] ,x["x_3"] ,x["x_4"] ,x["x_5"] ,x["x_6"] ,x["x_7"] ,x["x_8"] ,x["x_9"] ,x["x_10"] ,x["x_11"] ,x["x_12"] ,x["x_13"] ,x["x_14"] ,x["x_15"] ,x["x_16"] ,x["x_17"] ,x["x_18"] ,x["x_19"] ,x["x_20"] ,x["x_21"]),
                                                                        c(x["y_1"] ,x["y_2"] ,x["y_3"] ,x["y_4"] ,x["y_5"] ,x["y_6"] ,x["y_7"] ,x["y_8"] ,x["y_9"] ,x["y_10"] ,x["y_11"] ,x["y_12"] ,x["y_13"] ,x["y_14"] ,x["y_15"] ,x["y_16"] ,x["y_17"] ,x["y_18"] ,x["y_19"] ,x["y_20"] ,x["y_21"] )), cbind(c(x["x_1"] ,x["x_2"] ,x["x_3"] ,x["x_4"] ,x["x_5"] ,x["x_6"] ,x["x_7"] ,x["x_8"] ,x["x_9"] ,x["x_10"] ,x["x_11"] ,x["x_12"] ,x["x_13"] ,x["x_14"] ,x["x_15"] ,x["x_16"] ,x["x_17"] ,x["x_18"] ,x["x_19"] ,x["x_20"] ,x["x_21"] ),
 
@@ -263,7 +266,8 @@ features_list <- by(to_loop, to_loop$comb_and_frame, function(x) dplyr::select(x
   YardList <- yard_loop$Yards
   #catch any remaining errors, 
   YardList[is.na(YardList)] <- 0
-  function_graph_list <-list(ids = id_loop, y = YardList, train_x = training_features_list, train_a = train_matrix, loo_a = loo_matrix, loo_x = loo_feature_list)
+
+  function_graph_list <-list(ids = data.frame(id_loop), y = YardList, train_x = training_features_list, train_a = train_matrix, loo_a = loo_matrix, loo_x = loo_feature_list)
   
   return(function_graph_list)
 } 
@@ -271,7 +275,7 @@ features_list <- by(to_loop, to_loop$comb_and_frame, function(x) dplyr::select(x
 #train <-graph_processing_function(train_data)     
 #validate <-graph_processing_function(val_data)
 all_data <-graph_processing_function(dataframe)
-rm(list = setdiff(ls(),c("dataframe","all_data")))
+#rm(list = setdiff(ls(),c("dataframe","all_data")))
 
 #get test train split
 
@@ -283,12 +287,13 @@ test <-list(ids = all_data$ids[test_rows,], y = all_data$y[test_rows], train_x =
 train <-list(ids = all_data$ids[train_rows,], y = all_data$y[train_rows], train_x = all_data$train_x[train_rows], train_a = all_data$train_a[train_rows], loo_a = all_data$loo_a[train_rows], loo_x = all_data$loo_x[train_rows])
 validate <-list(ids = all_data$ids[val_rows,], y = all_data$y[val_rows], train_x = all_data$train_x[val_rows], train_a = all_data$train_a[val_rows], loo_a = all_data$loo_a[val_rows], loo_x = all_data$loo_x[val_rows])
 
-sapply(all_data, "[[",2)
-all_data$train_x[1]
-
 
 #run python code
 library(reticulate)
-#source_python("python_load_and_train_graph.py")
+
 source_python("py_test.py")
-model$predict
+
+predictions <- py$model$predict(loo_loader$load(), steps = loo_loader$steps_per_epoch)
+
+
+min(which(predictions[1,] > 0.5))
