@@ -39,9 +39,11 @@ all_tracking$comb_id <- paste0(as.character(all_tracking$gameId), " ", as.charac
 
 #subset just kick returns, kickoff and punt, not onside kicks
 return_plays <- plays_and_games %>% filter(specialTeamsResult == "Return") %>% drop_na(returnerId)
+FC_plays <- plays_and_games %>% filter(specialTeamsResult == "Fair Catch") %>% drop_na(returnerId)
 rm(plays_and_games)
 #subset just tracking relating to these return plays  
 return_tracking <- all_tracking[all_tracking$comb_id %in% return_plays$comb_id,]
+FC_tracking <- all_tracking[all_tracking$event == "fair_catch",]
 rm(all_tracking)
 #combine game and play dfs
 
@@ -50,8 +52,8 @@ return_tracking <-merge(x = return_tracking, y = return_plays[ ,c("comb_id", "ki
 
 
 #preprocessing to add some useful variables
-pre_processing_function <- function(df){
-  dataframe <- df %>% 
+pre_processing_function <- function(df_input){
+  dataframe <- df_input %>% 
     mutate(toLeft = playDirection == "left", 
            isBallCarrier = nflId == returnerId,
            teamOnOffense = ifelse(possessionTeam == homeTeamAbbr, "home", "away"),  
@@ -61,13 +63,12 @@ pre_processing_function <- function(df){
     )   ## Standardized Dir
   
   
-  return(dataframe)
-}
-
-pre_processed_dataframe<-pre_processing_function(return_tracking)
+#  return(dataframe)
+#}
+#pre_processed_dataframe<-pre_processing_function(return_tracking)
 #clean up to make less cpu intensive on Kaggle
 rm(return_tracking)
-dataframe <- pre_processed_dataframe %>% dplyr::select(-c("toLeft", "jerseyNumber", "position", "homeTeamAbbr","time", "x","y","dis","specialTeamsPlayType","teamOnOffense", "possessionTeam", "playDirection"))
+dataframe <- pre_processed_dataframe %>% dplyr::select(-c("toLeft", "jerseyNumber", "position", "homeTeamAbbr","time","dis","teamOnOffense", "possessionTeam", "playDirection"))
 rm(pre_processed_dataframe)
 ##########################
 #get returner dist to other players ahead of him for each frame,
@@ -166,35 +167,32 @@ dataframe <- dataframe %>% filter(comb_id != "2019090900 3818")
 #val_data <-dataframe %>% filter(comb_id %in% val_comb_id)
 #test_data <-dataframe %>% filter(comb_id %in% test_comb_id)
 
+test_rows <- packed_frames_inc_start$comb_id %in%packed_frames_inc_start$comb_id[testset]
+train_rows <- packed_frames_inc_start$comb_id %in%packed_frames_inc_start$comb_id[trainset]
+val_rows <- packed_frames_inc_start$comb_id %in%packed_frames_inc_start$comb_id[validset]
 
+rm(packed_frames_inc_start)
 
-
-
-
-
-
-
-
-
-
-rm(return_tracking)
 rm(IPWorking)
 rm(df_merged)
 rm(linesstore)
 rm(wide_dist_to_returner)
+rm(nearest_player_reception_to_tackle)
 #code to put in graph format, ties up with python file.
 
-graph_processing_function <- function(dataframe){
+#graph_processing_function <- function(dataframe){
   df <- dataframe %>% filter(displayName != "football") %>% 
     left_join(ballocation, by = c("comb_id", "frameId"))%>%
     left_join(df_play_dist, by = c("comb_id"))%>%
     unite("comb_and_frame", c(comb_id,frameId), sep= " ",remove = FALSE)%>%
     mutate(comb_and_frame = as.factor(comb_and_frame), returnYardstoGo = floor(x_std.y - play_over))
-  
+rm(dataframe)
+    
   linesstore<-apply(df, 1, function(x) dist(rbind(c(x["x_std.x"], x["y_std.x"]), c(x["x_std.y"], x["y_std.y"])), method = "euclidean" )[1])
   #store distance from ball as new variable
   df$linelength<-linesstore
-  
+rm(linesstore) 
+rm(ballocation)
   #add combandframe as list to do testtrain split after preprocessing
   #combandframe_list <- levels(df$comb_and_frame)
   function_graph_list <- list()
@@ -210,7 +208,10 @@ graph_processing_function <- function(dataframe){
   to_loop$node_type <- as.factor(to_loop$node_type)
   to_loop$specialTeamsPlayType <- droplevels(to_loop$specialTeamsPlayType)
   to_loop <-one_hot(data.table(to_loop),cols = c("node_type", "specialTeamsPlayType"))
-  #get y values
+
+rm(df)  
+  
+    #get y values
   yard_loop <- to_loop %>% dplyr::select(comb_and_frame, returnYardstoGo) %>% group_by(comb_and_frame) %>% 
     summarise(Yards = min(returnYardstoGo))  
   
@@ -278,21 +279,19 @@ features_list <- by(to_loop, to_loop$comb_and_frame, function(x) dplyr::select(x
     
  
 
-  function_graph_list <-list(ids = data.frame(id_loop), loo_rusher = loo_rusher, y = YardList, train_x = training_features_list, train_a = train_matrix, loo_a = loo_matrix, loo_x = loo_feature_list)
+    function_graph_list <-list(ids = data.frame(id_loop), loo_rusher = loo_rusher, y = YardList, train_x = training_features_list, train_a = train_matrix, loo_a = loo_matrix, loo_x = loo_feature_list)
   
   return(function_graph_list)
 } 
 #test <-graph_processing_function(test_data)     
 #train <-graph_processing_function(train_data)     
 #validate <-graph_processing_function(val_data)
-all_data <-graph_processing_function(dataframe)
+all_data <-pre_processing_function(return_tracking)
 
 #
 #get test train split
 
-test_rows <- packed_frames_inc_start$comb_id %in%packed_frames_inc_start$comb_id[testset]
-train_rows <- packed_frames_inc_start$comb_id %in%packed_frames_inc_start$comb_id[trainset]
-val_rows <- packed_frames_inc_start$comb_id %in%packed_frames_inc_start$comb_id[validset]
+
 
 test <-list( y = all_data$y[test_rows], train_x = all_data$train_x[test_rows], train_a = all_data$train_a[test_rows], loo_a = all_data$loo_a[test_rows], loo_x = all_data$loo_x[test_rows])
 train <-list( y = all_data$y[train_rows], train_x = all_data$train_x[train_rows], train_a = all_data$train_a[train_rows], loo_a = all_data$loo_a[train_rows], loo_x = all_data$loo_x[train_rows])

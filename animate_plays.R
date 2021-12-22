@@ -1,8 +1,44 @@
+plays <- read.csv("plays.csv")
+players <- read.csv("players.csv")
+games <- read.csv("games.csv")
+tracking18 <- read.csv("tracking2018.csv")
+tracking19 <- read.csv("tracking2019.csv")
+tracking20 <- read.csv("tracking2020.csv")
+#compile tracking and delete originals
+all_tracking <- rbind(tracking18, tracking19, tracking20)
+rm(tracking18)
+rm(tracking19)
+rm(tracking20)
+#add factors
+plays$specialTeamsPlayType <- as.factor(plays$specialTeamsPlayType)
+plays$specialTeamsResult <- as.factor(plays$specialTeamsResult)
+plays$gameId <- as.factor(plays$gameId)
+plays$playId <- as.factor(plays$playId)
+plays$returnerId <-sub("\\;.*", "", plays$returnerId)
+games$gameId <- as.factor(games$gameId)
+all_tracking$gameId <- as.factor(all_tracking$gameId)
+all_tracking$playId <- as.factor(all_tracking$playId)
+all_tracking$event <- as.factor(all_tracking$event)
+#add game data to plays
+plays_and_games <- merge(x = plays, y = games, by = "gameId", all.x=TRUE)
+#isolate gameId and Season for later
+game_and_season <- games %>% dplyr::select(gameId, season) %>% unique()
 
-example_play <- merge(return_tracking, return_plays, by = "comb_id")
+rm(plays)
+rm(games)
+#add combined Id to give each play a unique reference
+plays_and_games$comb_id <- paste0(as.character(plays_and_games$gameId), " ", as.character(plays_and_games$playId))
+all_tracking$comb_id <- paste0(as.character(all_tracking$gameId), " ", as.character(all_tracking$playId))
 
-example_play <- example_play %>%  filter(comb_id =="2018090900 4236")
+#subset just kick returns, kickoff and punt, not onside kicks
+return_plays <- plays_and_games %>% filter(specialTeamsResult == "Return") %>% drop_na(returnerId)
+rm(plays_and_games)
+#subset just tracking relating to these return plays  
+return_tracking <- all_tracking[all_tracking$comb_id %in% return_plays$comb_id,]
+example_play_sub <- merge(return_tracking, return_plays, by = "comb_id")
 
+example_play <- example_play_sub %>%  filter(comb_id =="2018102805 2014")
+just_our_guy <- example_play %>% filter(jerseyNumber == 51)
 library(gganimate)
 library(tidyverse)
 library(gganimate)
@@ -21,7 +57,7 @@ uprightSize = 4
 uprightOutlineColor = 'black'
 
 #attributes used for plot. first is away, second is football, third is home.
-cols_fill <- c("dodgerblue1", "#663300", "firebrick1")
+cols_fill <- c("#002244", "#663300", "#E31837")
 cols_col <- c("#000000", "#663300", "#000000")
 size_vals <- c(6, 4, 6)
 shape_vals <- c(21, 16, 21)
@@ -33,7 +69,7 @@ anim <- ggplot() +
   
   
   #creating field underlay
-  gg_field(yardmin = 65, yardmax = 122) +
+  gg_field(yardmin = 0, yardmax = 122) +
   
   #filling forest green for behind back of endzone
   theme(panel.background = element_rect(fill = 'forestgreen',
@@ -83,7 +119,12 @@ anim <- ggplot() +
                                       size = team,
                                       colour = team), 
              alpha = 0.7) +  
-  
+  geom_point(data = just_our_guy, aes(x = x,
+                                      y = y, 
+                                      shape = team,
+                                      fill = team,
+                                      group = nflId,
+                                      colour = team),size =10)+
   #adding jersey numbers
   geom_text(data = example_play,
             aes(x = x, y = y, label = jerseyNumber),
