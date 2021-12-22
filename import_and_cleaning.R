@@ -6,6 +6,7 @@ library(data.table)
 set.seed(1234)
 #import files needed now and set factors
 plays <- read.csv("plays.csv")
+players <- read.csv("players.csv")
 games <- read.csv("games.csv")
 tracking18 <- read.csv("tracking2018.csv")
 tracking19 <- read.csv("tracking2019.csv")
@@ -27,6 +28,9 @@ all_tracking$playId <- as.factor(all_tracking$playId)
 all_tracking$event <- as.factor(all_tracking$event)
 #add game data to plays
 plays_and_games <- merge(x = plays, y = games, by = "gameId", all.x=TRUE)
+#isolate gameId and Season for later
+game_and_season <- games %>% dplyr::select(gameId, season) %>% unique()
+
 rm(plays)
 rm(games)
 #add combined Id to give each play a unique reference
@@ -60,8 +64,11 @@ pre_processing_function <- function(df){
   return(dataframe)
 }
 
-dataframe<-pre_processing_function(return_tracking)
-
+pre_processed_dataframe<-pre_processing_function(return_tracking)
+#clean up to make less cpu intensive on Kaggle
+rm(return_tracking)
+dataframe <- pre_processed_dataframe %>% dplyr::select(-c("toLeft", "jerseyNumber", "position", "homeTeamAbbr","time", "x","y","dis","specialTeamsPlayType","teamOnOffense", "possessionTeam", "playDirection"))
+rm(pre_processed_dataframe)
 ##########################
 #get returner dist to other players ahead of him for each frame,
 #from original BDB20
@@ -170,9 +177,11 @@ dataframe <- dataframe %>% filter(comb_id != "2019090900 3818")
 
 
 
-
-
-
+rm(return_tracking)
+rm(IPWorking)
+rm(df_merged)
+rm(linesstore)
+rm(wide_dist_to_returner)
 #code to put in graph format, ties up with python file.
 
 graph_processing_function <- function(dataframe){
@@ -201,11 +210,16 @@ graph_processing_function <- function(dataframe){
   to_loop$node_type <- as.factor(to_loop$node_type)
   to_loop$specialTeamsPlayType <- droplevels(to_loop$specialTeamsPlayType)
   to_loop <-one_hot(data.table(to_loop),cols = c("node_type", "specialTeamsPlayType"))
+  #get y values
+  yard_loop <- to_loop %>% dplyr::select(comb_and_frame, returnYardstoGo) %>% group_by(comb_and_frame) %>% 
+    summarise(Yards = min(returnYardstoGo))  
   
+  YardList <- yard_loop$Yards
+  #catch any remaining errors, 
+  YardList[is.na(YardList)] <- 0 
   
   #loop to get distances between all points (adjacency matrix) (graph.a)
-  
-  froot_loop <- to_loop %>% 
+    froot_loop <- to_loop %>% 
     dplyr::select(comb_and_frame, x,y, row) %>% 
     pivot_wider( names_from = row, values_from = c(x,y))
   #loop to match nflIds to loo matrices
@@ -223,6 +237,7 @@ graph_processing_function <- function(dataframe){
   #attempting loo matrix
 loo_matrix <- list()  
 loo_feature_list <- list()
+loo_rusher <-data.frame()
 features_list <- by(to_loop, to_loop$comb_and_frame, function(x) dplyr::select(x,c("s","node_type_B","node_type_D","node_type_R","specialTeamsPlayType_Kickoff","specialTeamsPlayType_Punt")))  
   for(i in 1:nrow(froot_loop)){
     loo_matrix[[i]] <-list()
@@ -231,6 +246,7 @@ features_list <- by(to_loop, to_loop$comb_and_frame, function(x) dplyr::select(x
       dplyr::select(row)
     who_are_blockers_list <-as.vector(who_are_blockers_df$row)
     for(j in 1:length(who_are_blockers_list)){
+    loo_rusher <-  rbind(loo_rusher, c(levels(id_loop$comb_and_frame)[i],id_loop[i, as.character(who_are_blockers_df[j]$row)][[1]], YardList[i]))
     loo_feature_list[[i]][[j]] <-features_list[[i]][-(who_are_blockers_list[j])]
     loo_matrix[[i]][[j]] <- matrix(dist_matrix[,i],22,22)
     loo_matrix[[i]][[j]] <-loo_matrix[[i]][[j]][-(who_are_blockers_list[j]),]
@@ -260,14 +276,9 @@ features_list <- by(to_loop, to_loop$comb_and_frame, function(x) dplyr::select(x
       train_matrix[[i]] <- matrix(training_dist_matrix[,i],21,21)
       }
     
-  yard_loop <- to_loop %>% dplyr::select(comb_and_frame, returnYardstoGo) %>% group_by(comb_and_frame) %>% 
-    summarise(Yards = min(returnYardstoGo))  
-  
-  YardList <- yard_loop$Yards
-  #catch any remaining errors, 
-  YardList[is.na(YardList)] <- 0
+ 
 
-  function_graph_list <-list(ids = data.frame(id_loop), y = YardList, train_x = training_features_list, train_a = train_matrix, loo_a = loo_matrix, loo_x = loo_feature_list)
+  function_graph_list <-list(ids = data.frame(id_loop), loo_rusher = loo_rusher, y = YardList, train_x = training_features_list, train_a = train_matrix, loo_a = loo_matrix, loo_x = loo_feature_list)
   
   return(function_graph_list)
 } 
@@ -275,25 +286,63 @@ features_list <- by(to_loop, to_loop$comb_and_frame, function(x) dplyr::select(x
 #train <-graph_processing_function(train_data)     
 #validate <-graph_processing_function(val_data)
 all_data <-graph_processing_function(dataframe)
-#rm(list = setdiff(ls(),c("dataframe","all_data")))
 
+#
 #get test train split
 
 test_rows <- packed_frames_inc_start$comb_id %in%packed_frames_inc_start$comb_id[testset]
 train_rows <- packed_frames_inc_start$comb_id %in%packed_frames_inc_start$comb_id[trainset]
 val_rows <- packed_frames_inc_start$comb_id %in%packed_frames_inc_start$comb_id[validset]
 
-test <-list(ids = all_data$ids[test_rows,], y = all_data$y[test_rows], train_x = all_data$train_x[test_rows], train_a = all_data$train_a[test_rows], loo_a = all_data$loo_a[test_rows], loo_x = all_data$loo_x[test_rows])
-train <-list(ids = all_data$ids[train_rows,], y = all_data$y[train_rows], train_x = all_data$train_x[train_rows], train_a = all_data$train_a[train_rows], loo_a = all_data$loo_a[train_rows], loo_x = all_data$loo_x[train_rows])
-validate <-list(ids = all_data$ids[val_rows,], y = all_data$y[val_rows], train_x = all_data$train_x[val_rows], train_a = all_data$train_a[val_rows], loo_a = all_data$loo_a[val_rows], loo_x = all_data$loo_x[val_rows])
+test <-list( y = all_data$y[test_rows], train_x = all_data$train_x[test_rows], train_a = all_data$train_a[test_rows], loo_a = all_data$loo_a[test_rows], loo_x = all_data$loo_x[test_rows])
+train <-list( y = all_data$y[train_rows], train_x = all_data$train_x[train_rows], train_a = all_data$train_a[train_rows], loo_a = all_data$loo_a[train_rows], loo_x = all_data$loo_x[train_rows])
+validate <-list(y = all_data$y[val_rows], train_x = all_data$train_x[val_rows], train_a = all_data$train_a[val_rows], loo_a = all_data$loo_a[val_rows], loo_x = all_data$loo_x[val_rows])
 
 
 #run python code
 library(reticulate)
-
+#source_python("python_load_and_train_graph.py")
 source_python("py_test.py")
 
-predictions <- py$model$predict(loo_loader$load(), steps = loo_loader$steps_per_epoch)
 
+all_predictions <- py$model$predict(loader_all$load(), steps = loader_all$steps_per_epoch)
+all_loo_predictions <- py$model$predict(loo_loader$load(), steps = loo_loader$steps_per_epoch)
+test_predictions <- py$model$predict(loader_te$load(), steps = loader_te$steps_per_epoch)
+#rm(list = setdiff(ls(),c("dataframe","all_data", "all_predictions","all_loo_predictions","test_predictions")))
 
-min(which(predictions[1,] > 0.5))
+#assess test predictions
+test_eval <- data.frame(matrix(ncol = 0, nrow = 0))
+for(i in 1:nrow(test_predictions)){
+  predict <- min(which(test_predictions[i,] > 0.5)) -19
+  actual <-test$y[i]
+  test_eval <- rbind(test_eval, c(predict,actual))
+}
+
+#rmse(test_eval$X6, test_eval$X2)
+
+#evaluate all predictions
+all_eval <- data.frame(matrix(ncol = 0, nrow = 0))
+for(i in 1:nrow(all_predictions)){
+  comb_and_frame <- levels(all_data$ids$comb_and_frame)[i]
+  predict <- min(which(all_predictions[i,] > 0.5)) -19
+  actual <-all_data$y[i]
+  all_eval <- rbind(all_eval, c(comb_and_frame, predict,actual))
+}
+#eval loo
+loo_eval <- data.frame(matrix(ncol = 0, nrow = 0))
+for(i in 1:nrow(all_loo_predictions)){
+  #all_players predictions from above
+  all_player_preds<-all_eval[all_eval[1] == all_data$loo_rusher[i,1]]
+  #loo predictions from python
+  predict <- min(which(all_loo_predictions[i,] > 0.5)) -19
+  #actual values from loop
+  actual <-all_data$loo_rusher[i,]
+  #regex splitting out gameId to identify season
+  game_id <- str_split(str_extract(all_data$loo_rusher[i,1], "[0-9]+")," ")[[1]]
+  #match season to gameId
+  season_id <- game_and_season[game_and_season$gameId == game_id,]
+  #match player name to nflId
+  player_name <- players[players$nflId == actual[,2],7]
+  loo_eval <- rbind(loo_eval, c(actual[,1],season_id[,2], actual[,2],player_name, all_player_preds[2],predict))
+}
+
