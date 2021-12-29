@@ -15,12 +15,12 @@ from spektral.layers import GCNConv, GlobalSumPool
 learning_rate = 1e-2  # Learning rate
 epochs = 100  # Number of training epochs
 es_patience = 10  # Patience for early stopping
-batch_size = 32  # Batch size
+batch_size = 21  # Batch size
 local_all = r.all_data
 local_test = r.test
 local_train = r.train
 local_val = r.validate
-
+local_fc = r.fc_data
 ################################################################################
 # Load data
 ################################################################################
@@ -59,16 +59,19 @@ class GraphDataset(Dataset):
 len_train = len(local_train["train_x"])
 len_val = len(local_val["train_x"])
 len_test = len(local_test["train_x"])
-
+len_all = len(local_all["train_x"])
+len_fc= len(local_fc["train_x"])
 data_tr = GraphDataset(n_samples = len_train, df = local_train, transforms=NormalizeAdj())
 data_va = GraphDataset(n_samples = len_val, df = local_val, transforms=NormalizeAdj())
 data_te = GraphDataset(n_samples = len_test, df=local_test, transforms=NormalizeAdj())
-
+data_all = GraphDataset(n_samples = len_all, df=local_all, transforms=NormalizeAdj())
+data_fc = GraphDataset(n_samples = len_fc, df=local_fc, transforms=NormalizeAdj())
 # Data loaders
 loader_tr = BatchLoader(data_tr, batch_size=batch_size, epochs=epochs)
 loader_va = BatchLoader(data_va, batch_size=batch_size)
 loader_te = BatchLoader(data_te, batch_size=batch_size)
-
+loader_all = BatchLoader(data_all, batch_size=batch_size)
+loader_fc = BatchLoader(data_fc, batch_size=batch_size)
 ################################################################################
 # Build model
 ################################################################################
@@ -90,7 +93,7 @@ class MyFirstGNN(Model):
         return out
 
 
-model = MyFirstGNN(32, 120)
+model = MyFirstGNN(21, 120)
 model.compile('adam', "mean_squared_error")
 
 model.fit(loader_tr.load(), validation_data= loader_va.load(), steps_per_epoch=loader_tr.steps_per_epoch,
