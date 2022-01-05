@@ -138,8 +138,8 @@ for(i in 1:length(levels(df_in_play$comb_id))){
   
   nearest_player_reception_to_tackle <- rbind(nearest_player_reception_to_tackle, result)
 } 
-# have wide frame of defender x pos
-#get frames where kicking team players are packed
+
+#get frames where kicking team players are packed (passed) to make snapshot
 nearest_player_reception_to_tackle$lag <- lag(nearest_player_reception_to_tackle$`1`)
 nearest_player_reception_to_tackle$diff <- nearest_player_reception_to_tackle$lag != nearest_player_reception_to_tackle$`1`
 
@@ -149,31 +149,20 @@ packed_frames_inc_start <- unique(rbind(packed_frames,df_in_play_renamed[c("comb
 packed_frames_inc_start$comb_id <- droplevels(packed_frames_inc_start$comb_id) 
 packed_frames_list <-paste0(packed_frames_inc_start$comb_id," ", packed_frames_inc_start$frameId)
 
-
- 
-#length(levels(packed_frames_inc_start$comb_id))
-
-#now to test / train split and add punt/ko to features
-
 #split on combid so same plays aren't in test and train
 N<-length(levels(packed_frames_inc_start$comb_id))
 trainset<-sort(sample(1:N,size=floor(N*0.70)))
 nottestset<-setdiff(1:N,trainset)
 validset<-sort(sample(nottestset,size=length(nottestset)/2))
 testset<-sort(setdiff(nottestset,validset))
-#train_comb_id <-levels(packed_frames_inc_start$comb_id)[trainset]
-#val_comb_id <-levels(packed_frames_inc_start$comb_id)[validset]
-#test_comb_id <-levels(packed_frames_inc_start$comb_id)[testset]
-#get split in dataframe
-dataframe <- dataframe %>% filter(comb_id != "2019090900 3818") %>% 
-  filter(comb_id %in% levels(packed_frames_inc_start$comb_id) & frameId %in% levels(packed_frames_inc_start$frameId))
-#train_data <-dataframe %>% filter(comb_id %in% train_comb_id)
-#val_data <-dataframe %>% filter(comb_id %in% val_comb_id)
-#test_data <-dataframe %>% filter(comb_id %in% test_comb_id)
-
 test_rows <- packed_frames_inc_start$comb_id %in%packed_frames_inc_start$comb_id[testset]
 train_rows <- packed_frames_inc_start$comb_id %in%packed_frames_inc_start$comb_id[trainset]
 val_rows <- packed_frames_inc_start$comb_id %in%packed_frames_inc_start$comb_id[validset]
+
+
+#subset dataframe to just chosen plays
+dataframe <- dataframe %>% 
+  filter(comb_id %in% levels(packed_frames_inc_start$comb_id) & frameId %in% packed_frames_inc_start$frameId)
 
 rm(packed_frames_inc_start)
 
@@ -182,33 +171,45 @@ rm(df_merged)
 rm(linesstore)
 rm(wide_dist_to_returner)
 rm(nearest_player_reception_to_tackle)
-#code to put in graph format, ties up with python file.
 
-graph_processing_function <- function(dataframe){
+#function to put chosen data in graph format, for use with Python Spektral package
+graph_processing_function <- function(dataframe, leave_one_out = 1){
+  #get ball location for each play
   ball_location <-dataframe %>% filter(nflId == returnerId) %>% dplyr::select(c(comb_id, frameId, x_std, y_std))
+  #join ball location and distance
   df <- dataframe %>% filter(displayName != "football") %>% 
     left_join(ball_location, by = c("comb_id", "frameId"))%>%
     left_join(df_play_dist, by = c("comb_id"))%>%
+    #create new row id combining gameId, playId and frameId
     unite("comb_and_frame", c(comb_id,frameId), sep= " ",remove = FALSE)%>%
+    #create returnyardstogo variable to get yards remaining on a play
     mutate(comb_and_frame = as.factor(comb_and_frame), returnYardstoGo = floor(x_std.y - play_over))
-rm(dataframe)
-    
+#get distance from ball to player on each frame
   linesstore<-apply(df, 1, function(x) dist(rbind(c(x["x_std.x"], x["y_std.x"]), c(x["x_std.y"], x["y_std.y"])), method = "euclidean" )[1])
   #store distance from ball as new variable
   df$linelength<-linesstore
 rm(linesstore) 
 rm(ball_location)
-  #add combandframe as list to do testtrain split after preprocessing
-  #combandframe_list <- levels(df$comb_and_frame)
+  #group combandframe get node feature details
   function_graph_list <- list()
+  #if loo is selected subset on chosen frames, otherwise no need
+  if(leave_one_out ==1){
   to_loop <- df %>% 
     group_by(comb_and_frame) %>% 
     mutate(node_type = case_when(
       isBallCarrier ~ "R",
       isOnOffense ~ "B",
       isOnOffense ==F ~ "D"), row = rank(linelength, ties.method= "random"))%>% 
-    #filter(comb_and_frame %in% packed_frames_list) %>% 
+    filter(comb_and_frame %in% packed_frames_list) %>% 
     dplyr::select(comb_and_frame, returnYardstoGo,nflId,isBallCarrier,isOnOffense, s, node_type, specialTeamsPlayType, x, y, row) 
+  } else{to_loop <- df %>% 
+    group_by(comb_and_frame) %>% 
+    mutate(node_type = case_when(
+      isBallCarrier ~ "R",
+      isOnOffense ~ "B",
+      isOnOffense ==F ~ "D"), row = rank(linelength, ties.method= "random"))%>% 
+    #filter(comb_and_frame %in% packed_frames_list) %>% 
+    dplyr::select(comb_and_frame, returnYardstoGo,nflId,isBallCarrier,isOnOffense, s, node_type, specialTeamsPlayType, x, y, row)}
   to_loop$comb_and_frame <- droplevels(to_loop$comb_and_frame)
   to_loop$node_type <- as.factor(to_loop$node_type)
   to_loop$specialTeamsPlayType <- droplevels(to_loop$specialTeamsPlayType)
@@ -229,38 +230,41 @@ rm(df)
     dplyr::select(comb_and_frame, x,y, row) %>% 
     pivot_wider( names_from = row, values_from = c(x,y))
   #loop to match nflIds to loo matrices
-  id_loop <- to_loop %>% 
+  id_loop <- to_loop %>% filter(node_type_D ==1) %>% 
     dplyr::select(comb_and_frame, nflId, row) %>% 
     pivot_wider( names_from = row, values_from = nflId)
   blocker_loop<- to_loop %>% 
     dplyr::select(comb_and_frame, node_type_D, row) %>% filter(node_type_D ==1)
-  #moved up
   #get node features(graph.x)
   #get S and R D B for every play (2 node features)
   dist_matrix <-apply(froot_loop, 1, function(x) pointDistance(cbind(c(x["x_1"] ,x["x_2"] ,x["x_3"] ,x["x_4"] ,x["x_5"] ,x["x_6"] ,x["x_7"] ,x["x_8"] ,x["x_9"] ,x["x_10"] ,x["x_11"] ,x["x_12"] ,x["x_13"] ,x["x_14"] ,x["x_15"] ,x["x_16"] ,x["x_17"] ,x["x_18"] ,x["x_19"] ,x["x_20"] ,x["x_21"] ,x["x_22"] ),
                                                                      c(x["y_1"] ,x["y_2"] ,x["y_3"] ,x["y_4"] ,x["y_5"] ,x["y_6"] ,x["y_7"] ,x["y_8"] ,x["y_9"] ,x["y_10"] ,x["y_11"] ,x["y_12"] ,x["y_13"] ,x["y_14"] ,x["y_15"] ,x["y_16"] ,x["y_17"] ,x["y_18"] ,x["y_19"] ,x["y_20"] ,x["y_21"] ,x["y_22"] )), cbind(c(x["x_1"] ,x["x_2"] ,x["x_3"] ,x["x_4"] ,x["x_5"] ,x["x_6"] ,x["x_7"] ,x["x_8"] ,x["x_9"] ,x["x_10"] ,x["x_11"] ,x["x_12"] ,x["x_13"] ,x["x_14"] ,x["x_15"] ,x["x_16"] ,x["x_17"] ,x["x_18"] ,x["x_19"] ,x["x_20"] ,x["x_21"] ,x["x_22"] ),
                                                                                                                                                                                                                                                                                                                          c(x["y_1"] ,x["y_2"] ,x["y_3"] ,x["y_4"] ,x["y_5"] ,x["y_6"] ,x["y_7"] ,x["y_8"] ,x["y_9"] ,x["y_10"] ,x["y_11"] ,x["y_12"] ,x["y_13"] ,x["y_14"] ,x["y_15"] ,x["y_16"] ,x["y_17"] ,x["y_18"] ,x["y_19"] ,x["y_20"] ,x["y_21"] ,x["y_22"] )), lonlat=F, allpairs =T))
-  #attempting loo matrix
-loo_matrix <- list()  
-loo_feature_list <- list()
-loo_rusher <-data.frame()
-features_list <- by(to_loop, to_loop$comb_and_frame, function(x) dplyr::select(x,c("s","node_type_B","node_type_D","node_type_R","specialTeamsPlayType_Kickoff","specialTeamsPlayType_Punt")))  
+  
+  #loop to get adjacency matrix for leave-one-out (blocking) calculation
+  loo_matrix <- list()  
+  loo_feature_list <- list()
+  loo_rusher <-data.frame()
+  if(leave_one_out ==1){
+  features_list <- by(to_loop, to_loop$comb_and_frame, function(x) dplyr::select(x,c("s","node_type_B","node_type_D","node_type_R","specialTeamsPlayType_Kickoff","specialTeamsPlayType_Punt")))  
   for(i in 1:nrow(froot_loop)){
     loo_matrix[[i]] <-list()
     loo_feature_list[[i]] <-list()
-    who_are_blockers_df <- blocker_loop %>% filter(comb_and_frame== levels(froot_loop$comb_and_frame)[i]) %>% 
+    who_are_blockers_df <- blocker_loop %>% filter(comb_and_frame== froot_loop$comb_and_frame[i]) %>% 
       dplyr::select(row)
     who_are_blockers_list <-as.vector(who_are_blockers_df$row)
+    #for each blocker on play capture the feature list and adj matrix without them
     for(j in 1:length(who_are_blockers_list)){
-    loo_rusher <-  rbind(loo_rusher, c(levels(id_loop$comb_and_frame)[i],id_loop[i, as.character(who_are_blockers_df[j]$row)][[1]], YardList[i]))
-    loo_feature_list[[i]][[j]] <-features_list[[i]][-(who_are_blockers_list[j])]
-    loo_matrix[[i]][[j]] <- matrix(dist_matrix[,i],22,22)
-    loo_matrix[[i]][[j]] <-loo_matrix[[i]][[j]][-(who_are_blockers_list[j]),]
-    loo_matrix[[i]][[j]] <-loo_matrix[[i]][[j]][,-who_are_blockers_list[j]]
+      loo_rusher <-  rbind(loo_rusher, c(levels(id_loop$comb_and_frame)[i],id_loop[i, as.character(who_are_blockers_df[j]$row)][[1]], YardList[i]))
+      loo_feature_list[[i]][[j]] <-features_list[[i]][-(who_are_blockers_list[j])]
+      loo_matrix[[i]][[j]] <- matrix(dist_matrix[,i],22,22)
+      loo_matrix[[i]][[j]] <-loo_matrix[[i]][[j]][-(who_are_blockers_list[j]),]
+      loo_matrix[[i]][[j]] <-loo_matrix[[i]][[j]][,-who_are_blockers_list[j]]
     }
-    }
-    
-    training_to_loop <- to_loop %>% filter(row !=22)
+  }
+  }
+  #non loo details, for expected yards leave furthest row out so training is on 21 players  
+  training_to_loop <- to_loop %>% filter(row !=22)
     training_froot_loop <- training_to_loop %>% 
       dplyr::select(comb_and_frame, x,y, row) %>% 
       pivot_wider( names_from = row, values_from = c(x,y))
@@ -288,16 +292,11 @@ features_list <- by(to_loop, to_loop$comb_and_frame, function(x) dplyr::select(x
   
   return(function_graph_list)
 } 
-#test <-graph_processing_function(test_data)     
-#train <-graph_processing_function(train_data)     
-#validate <-graph_processing_function(val_data)
-all_data <-graph_processing_function(dataframe)
-fc_data <-graph_processing_function(fc_dataframe)
-#
+
+
+all_data <-graph_processing_function(dataframe, leave_one_out = 1)
+
 #get test train split
-
-
-
 test <-list( y = all_data$y[test_rows], train_x = all_data$train_x[test_rows], train_a = all_data$train_a[test_rows], loo_a = all_data$loo_a[test_rows], loo_x = all_data$loo_x[test_rows])
 train <-list( y = all_data$y[train_rows], train_x = all_data$train_x[train_rows], train_a = all_data$train_a[train_rows], loo_a = all_data$loo_a[train_rows], loo_x = all_data$loo_x[train_rows])
 validate <-list(y = all_data$y[val_rows], train_x = all_data$train_x[val_rows], train_a = all_data$train_a[val_rows], loo_a = all_data$loo_a[val_rows], loo_x = all_data$loo_x[val_rows])
@@ -305,33 +304,40 @@ validate <-list(y = all_data$y[val_rows], train_x = all_data$train_x[val_rows], 
 
 #run python code
 library(reticulate)
-#source_python("python_load_and_train_graph.py")
-source_python("py_test.py")
+source_python("GNN_Functions.py")
 
 
 all_predictions <- py$model$predict(loader_all$load(), steps = loader_all$steps_per_epoch)
 all_loo_predictions <- py$model$predict(loo_loader$load(), steps = loo_loader$steps_per_epoch)
 test_predictions <- py$model$predict(loader_te$load(), steps = loader_te$steps_per_epoch)
-#rm(list = setdiff(ls(),c("dataframe","all_data", "all_predictions","all_loo_predictions","test_predictions")))
 
 #assess test predictions
 test_eval <- data.frame(matrix(ncol = 0, nrow = 0))
 for(i in 1:nrow(test_predictions)){
-  predict <- min(which(test_predictions[i,] > 0.5)) -19
-  actual <-test$y[i]
+  predict <- test_predictions[i,]
+  actual <- rep(0,120)                 
+  actual[test$y[i]+19:length(actual)] <- 1
   test_eval <- rbind(test_eval, c(predict,actual))
 }
+names(test_eval) <- c(predict,actual)
 
-#rmse(test_eval$X6, test_eval$X2)
 
 #evaluate all predictions
+#first add combandframe to dataframe to add on rushers
 all_eval <- data.frame(matrix(ncol = 0, nrow = 0))
+dataframe <- dataframe %>% filter(nflId == returnerId) %>% 
+  unite("comb_and_frame", c(comb_id,frameId), sep= " ",remove = FALSE)
+dataframe$comb_and_frame <- as.factor(dataframe$comb_and_frame)
 for(i in 1:nrow(all_predictions)){
   comb_and_frame <- levels(all_data$ids$comb_and_frame)[i]
+  returner <- dataframe[dataframe$comb_and_frame == comb_and_frame,"displayName"]
   predict <- min(which(all_predictions[i,] > 0.5)) -19
   actual <-all_data$y[i]
-  all_eval <- rbind(all_eval, c(comb_and_frame, predict,actual))
+  difference <- actual - predict
+  all_eval <- rbind(all_eval, c(comb_and_frame, returner, predict,actual, difference))
 }
+colnames(all_eval) <- c("comb_and_frame", "returner", "predict","actual", "difference")
+
 #eval loo
 loo_eval <- data.frame(matrix(ncol = 0, nrow = 0))
 for(i in 1:nrow(all_loo_predictions)){
@@ -347,6 +353,8 @@ for(i in 1:nrow(all_loo_predictions)){
   season_id <- game_and_season[game_and_season$gameId == game_id,]
   #match player name to nflId
   player_name <- players[players$nflId == actual[,2],7]
-  loo_eval <- rbind(loo_eval, c(actual[,1],season_id[,2], actual[,2],player_name, all_player_preds[2],predict))
+  difference <- predict - as.numeric(actual[,3])
+  loo_eval <- rbind(loo_eval, c(actual[,1],season_id[,2], actual[,2],player_name, as.numeric(actual[,3]),predict, difference))
 }
+names(loo_eval) <- c("combandframe",	"season",	"nflId",	"Name",	"predict",	"loo_predict", "Difference")
 
